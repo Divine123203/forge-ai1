@@ -1,5 +1,5 @@
-import { createClient } from '@/utils/supabase/server'; // 1. Use the new server utility
-import { createClient as createAdminClient } from '@supabase/supabase-js'; // For the Admin/Service Role
+import { createClient } from '@/utils/supabase/server'; 
+import { createClient as createAdminClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
 
 export async function POST(req: Request) {
@@ -16,37 +16,31 @@ export async function POST(req: Request) {
   }
 
   // 2. AUTHENTICATE THE USER
-  // We use our server utility which automatically handles cookies
+  // We initialize the server client which automatically parses cookies from 'req'
   const supabase = await createClient();
 
-  // Check for the Manual Token first (from our frontend 'Authorization' header)
-  const authHeader = req.headers.get('Authorization');
-  const token = authHeader?.split('Bearer ')[1];
+  // We use getUser() - this is the most reliable way to check the session in an API route
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-  let user = null;
-
-  if (token) {
-    // Verify session using the manual token
-    const { data } = await supabase.auth.getUser(token);
-    user = data.user;
-  } else {
-    // Fall back to checking the browser cookies
-    const { data } = await supabase.auth.getUser();
-    user = data.user;
-  }
-
-  if (!user) {
-    console.error("❌ AUTH ERROR: No user found via token or cookies");
-    return NextResponse.json({ error: "Unauthorized: Please log in again." }, { status: 401 });
+  if (authError || !user) {
+    console.error("❌ AUTH ERROR: Session invalid or expired", authError?.message);
+    return NextResponse.json(
+      { error: "Unauthorized: Your session has expired. Please log in again." }, 
+      { status: 401 }
+    );
   }
 
   const userId = user.id;
 
-  // 3. INITIALIZE ADMIN CLIENT (For database writes)
+  // 3. INITIALIZE ADMIN CLIENT (For database writes bypassing RLS if necessary)
   const supabaseAdmin = createAdminClient(supabaseUrl, supabaseServiceKey);
 
   try {
     const { content, title, count } = await req.json();
+
+    if (!content) {
+      return NextResponse.json({ error: "Content is required to generate a quiz." }, { status: 400 });
+    }
 
     if (!groqApiKey) {
       throw new Error("GROQ_API_KEY is missing in the server environment.");
@@ -56,7 +50,7 @@ export async function POST(req: Request) {
     const { data: note, error: noteError } = await supabaseAdmin
       .from('notes')
       .insert([{ 
-        content: content || "Manual entry analysis", 
+        content: content, 
         title: title || "New Study Session",
         user_id: userId 
       }])
@@ -68,14 +62,14 @@ export async function POST(req: Request) {
     // 5. Construct Prompt
     const promptText = `
       You are a specialized JSON quiz generator.
-      Analyze the following content and create exactly ${count} multiple-choice questions.
+      Analyze the following content and create exactly ${count || 5} multiple-choice questions.
       STRICT RULES: Return ONLY raw JSON with "summary" (string) and "questions" (array of objects). 
-      Each question must have "question_text", "options" (array), and "correct_answer".
+      Each question must have "question_text", "options" (array of 4 strings), and "correct_answer" (must match one of the options exactly).
       Content: ${content}
     `;
 
     // 6. Fetch from Groq
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    const aiResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${groqApiKey}`,
@@ -84,15 +78,16 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         model: "llama-3.3-70b-versatile",
         messages: [
-          { role: "system", content: "You are a JSON-only API." },
+          { role: "system", content: "You are a JSON-only API that outputs structured quiz data." },
           { role: "user", content: promptText }
         ],
-        response_format: { type: "json_object" }
+        response_format: { type: "json_object" },
+        temperature: 0.7
       }),
     });
 
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error?.message || "Groq API Failure");
+    const result = await aiResponse.json();
+    if (!aiResponse.ok) throw new Error(result.error?.message || "Groq API Failure");
 
     const aiData = JSON.parse(result.choices[0].message.content);
 
@@ -115,7 +110,7 @@ export async function POST(req: Request) {
       question_text: q.question_text,
       options: q.options,
       correct_answer: q.correct_answer,
-      question_type: q.question_type || "CBT",
+      question_type: "CBT",
       user_id: userId 
     }));
 

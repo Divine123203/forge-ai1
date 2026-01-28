@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, use } from 'react';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/client'; // Updated import
 import { useRouter } from 'next/navigation';
-import { ChevronRight, ChevronLeft, RotateCcw, Award, Home, Eye, CheckCircle } from 'lucide-react';
+import { ChevronRight, ChevronLeft, RotateCcw, Award, Home, Eye, CheckCircle, Loader2 } from 'lucide-react';
 
 interface Question {
   id: string;
@@ -15,16 +15,16 @@ interface Question {
 export default function QuizPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+  const supabase = createClient(); // Initialize client
   
-  // State Management
   const [masterQuestions, setMasterQuestions] = useState<Question[]>([]); 
   const [questions, setQuestions] = useState<Question[]>([]); 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswers, setUserAnswers] = useState<Record<number, string>>({});
   const [isFinished, setIsFinished] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
+  const [loading, setLoading] = useState(true); // Added loading state
 
-  // 1. Shuffle Logic
   const shuffleArray = (array: any[]) => {
     const shuffled = [...array];
     for (let i = shuffled.length - 1; i > 0; i--) {
@@ -34,23 +34,27 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
     return shuffled;
   };
 
-  // 2. Fetch Questions
   useEffect(() => {
     async function fetchQuestions() {
+      setLoading(true);
       const { data, error } = await supabase
         .from('questions')
         .select('*')
         .eq('quiz_id', id);
 
+      if (error) {
+        console.error("Supabase Error:", error);
+      }
+
       if (data && data.length > 0) {
         setMasterQuestions(data);
         setQuestions(shuffleArray(data)); 
       }
+      setLoading(false);
     }
     fetchQuestions();
-  }, [id]);
+  }, [id, supabase]);
 
-  // 3. Navigation Functions
   const handleNext = () => {
     if (currentIndex < questions.length - 1) {
       setCurrentIndex(prev => prev + 1);
@@ -76,7 +80,28 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
     return total;
   };
 
-  if (questions.length === 0) return <div className="p-20 text-center text-gray-500 animate-pulse">Loading exam questions...</div>;
+  // Improved Loading State
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
+        <Loader2 className="animate-spin text-blue-600 mb-4" size={40} />
+        <p className="text-slate-500 font-bold animate-pulse">Fetching your questions...</p>
+      </div>
+    );
+  }
+
+  // Handle case where ID is valid but no questions exist in DB
+  if (questions.length === 0) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
+        <h2 className="text-2xl font-bold mb-2">No questions found</h2>
+        <p className="text-slate-500 mb-6">This quiz might be empty or was deleted.</p>
+        <button onClick={() => router.push('/generator')} className="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold">
+          Go to Generator
+        </button>
+      </div>
+    );
+  }
 
   // --- SCREEN A: FINAL RESULTS ---
   if (isFinished) {
@@ -89,7 +114,7 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
           <Award className="mx-auto text-yellow-500 mb-4" size={80} />
           <h2 className="text-3xl font-bold mb-2">Quiz Results</h2>
           <div className="text-6xl font-black text-blue-600 my-6">{finalScore} / {questions.length}</div>
-          <p className="text-lg text-gray-500 mb-8 font-medium italic">"Practice makes perfect!" - {percentage}%</p>
+          <p className="text-lg text-gray-500 mb-8 font-medium italic">"{percentage >= 70 ? 'Excellent work!' : 'Keep practicing!'}"</p>
           
           <div className="flex flex-col space-y-3">
             <button 
@@ -98,14 +123,12 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
             >
               <RotateCcw size={20} /> <span>Retake (New Order)</span>
             </button>
-            
-            {/* 🛠️ THE HARD FIX: Standard <a> tag to force navigation out of the history route */}
-            <a 
-              href="/" 
-              className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold flex items-center justify-center space-x-2 hover:bg-black transition shadow-lg no-underline"
+            <button 
+              onClick={() => router.push('/generator')} 
+              className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold flex items-center justify-center space-x-2 hover:bg-black transition shadow-lg"
             >
-              <Home size={20} /> <span>Return to Home</span>
-            </a>
+              <Home size={20} /> <span>Create New Quiz</span>
+            </button>
           </div>
         </div>
       </div>
@@ -196,7 +219,7 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
           <button
             onClick={handleNext}
             className={`flex-[2] py-5 rounded-2xl font-bold flex items-center justify-center space-x-2 transition shadow-lg ${
-              !currentSelection ? 'bg-gray-200 text-gray-400' : 'bg-slate-900 text-white hover:bg-black'
+              !currentSelection ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-black'
             }`}
           >
             <span>{currentIndex === questions.length - 1 ? "Review All" : "Next Question"}</span>

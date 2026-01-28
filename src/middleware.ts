@@ -2,10 +2,10 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 /**
- * Proxy function (Middleware)
- * Handles authentication redirects and cookie syncing
+ * Standard Next.js Middleware
+ * Handles authentication redirects and cookie syncing for App Router
  */
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   // 1. INITIAL RESPONSE
   let response = NextResponse.next({
     request: {
@@ -17,7 +17,6 @@ export async function proxy(request: NextRequest) {
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
   if (!supabaseUrl || !supabaseKey) {
-    console.error("❌ SUPABASE ENV ERROR: Missing URL or Key")
     return response
   }
 
@@ -30,61 +29,66 @@ export async function proxy(request: NextRequest) {
         get(name: string) {
           return request.cookies.get(name)?.value
         },
-        set(name: string, value: string, options: CookieOptions) {
-          // Sync cookies to request and response
-          request.cookies.set({ name, value, ...options })
-          response = NextResponse.next({
-            request: { headers: request.headers },
-          })
-          response.cookies.set({ name, value, ...options, path: '/' })
-        },
+        // Inside your middleware set() function
+set(name: string, value: string, options: CookieOptions) {
+  request.cookies.set({ name, value, ...options })
+  response = NextResponse.next({
+    request: { headers: request.headers },
+  })
+  // Ensure path is ALWAYS '/' so /api can see it
+  response.cookies.set({ 
+    name, 
+    value, 
+    ...options, 
+    path: '/', 
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production' 
+  })
+},
         remove(name: string, options: CookieOptions) {
           // Sync cookie removal
           request.cookies.set({ name, value: '', ...options })
           response = NextResponse.next({
             request: { headers: request.headers },
           })
-          response.cookies.set({ name, value: '', ...options, path: '/' })
+          response.cookies.set({ name, value: '', ...options, path: '/', sameSite: 'lax' })
         },
       },
     }
   )
 
   // 3. AUTHENTICATION LOGIC
-  // Use getSession() for middleware - it's more stable for redirects
-  const { data: { session } } = await supabase.auth.getSession()
+  // getUser() is more secure as it re-validates the session with Supabase auth
+  const { data: { user } } = await supabase.auth.getUser()
   const { pathname } = request.nextUrl
 
   // Define routes that require a logged-in user
   const isProtectedRoute = 
     pathname.startsWith('/quiz') || 
     pathname.startsWith('/dashboard') || 
-    pathname.startsWith('/library');
+    pathname.startsWith('/library') ||
+    pathname.startsWith('/generator'); // Added your new generator path
 
-  // A. PROTECTED ROUTE CHECK: If no session and trying to access protected content
-  if (!session && isProtectedRoute) {
+  // A. PROTECTED ROUTE CHECK: If no user and trying to access private content
+  if (!user && isProtectedRoute) {
     const loginUrl = new URL('/login', request.url)
-    // Optional: add a return-to parameter
-    loginUrl.searchParams.set('next', pathname) 
     return NextResponse.redirect(loginUrl)
   }
 
   // B. AUTH PAGE CHECK: If logged in, don't let them see the login page
-  if (session && pathname.startsWith('/login')) {
-    // If you have a root page (dashboard) at '/', use that
-    return NextResponse.redirect(new URL('/', request.url))
+  // Redirect them to their library/dashboard instead
+  if (user && pathname.startsWith('/login')) {
+    return NextResponse.redirect(new URL('/generator', request.url))
   }
 
   return response
 }
 
-export default proxy;
-
 // 4. MATCHER CONFIGURATION
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
+     * Match all request paths except for:
      * - api (API routes)
      * - _next/static (static files)
      * - _next/image (image optimization files)
