@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Tesseract from 'tesseract.js'; // 1. Import Tesseract for OCR
+import Tesseract from 'tesseract.js';
+import { createClient } from '@supabase/supabase-js'; // 1. Added Supabase Import
 import { 
   Upload, 
   FileText, 
@@ -11,20 +12,24 @@ import {
   BookOpen, 
   Settings2, 
   RotateCcw,
-  Search // New icon for scanning
+  Search 
 } from 'lucide-react';
+
+// Initialize Supabase for the frontend to grab the session
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export default function Dashboard() {
   const router = useRouter();
   
-  // States
   const [inputText, setInputText] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const [scanning, setScanning] = useState(false); // New state for image scanning
+  const [scanning, setScanning] = useState(false);
   const [questionCount, setQuestionCount] = useState(10);
 
-  // --- HELPER: PDF Text Extraction ---
   const extractPdfText = async (file: File) => {
     const pdfjs = await import('pdfjs-dist');
     pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -42,23 +47,25 @@ export default function Dashboard() {
   const handleGenerate = async () => {
     setLoading(true);
     try {
-      let finalContent = inputText;
-      let payload: any = { 
-        count: questionCount,
-        title: file ? file.name : "New Study Session"
-      };
+      // 2. Get the current session manually
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        alert("Session expired. Please log in again.");
+        router.push('/login');
+        return;
+      }
 
-      // 2. Handle File Processing
+      let finalContent = inputText;
+      
       if (file) {
         if (file.type === "application/pdf") {
           finalContent = await extractPdfText(file);
         } else if (file.type.startsWith("image/")) {
-          // --- OCR LOGIC START ---
           setScanning(true);
           const { data: { text } } = await Tesseract.recognize(file, 'eng');
           finalContent = text;
           setScanning(false);
-          // --- OCR LOGIC END ---
         }
       }
 
@@ -68,22 +75,32 @@ export default function Dashboard() {
         return;
       }
 
-      payload.content = finalContent;
-
+      // 3. Send request with EXPLICIT Authorization header
       const res = await fetch('/api/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        headers: { 
+          'Content-Type': 'application/json',
+          // Hand-deliver the token to the API
+          'Authorization': `Bearer ${session.access_token}` 
+        },
+        body: JSON.stringify({
+          content: finalContent,
+          count: questionCount,
+          title: file ? file.name : "New Study Session"
+        })
       });
 
       const result = await res.json();
-      if (result.success) {
-        router.push(`/quiz/${result.quizId}`);
+
+      if (res.ok && result.success) {
+        setTimeout(() => {
+          router.push(`/quiz/${result.quizId}`);
+        }, 100); 
       } else {
-        alert("Error: " + result.error);
+        alert("Error: " + (result.error || "Failed to generate quiz"));
       }
     } catch (err) {
-      console.error(err);
+      console.error("Frontend Error:", err);
       alert("Something went wrong during generation!");
     } finally {
       setLoading(false);
@@ -94,7 +111,6 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-slate-50 text-black p-4 py-12 px-4">
       <div className="max-w-4xl mx-auto">
-        
         {/* Header */}
         <div className="flex items-center justify-between mb-10">
           <div className="flex items-center space-x-4">
@@ -108,7 +124,7 @@ export default function Dashboard() {
           </div>
 
           <button 
-            onClick={() => router.push('/dashboard')}
+            onClick={() => router.push('/library')}
             className="flex items-center space-x-2 text-slate-600 font-bold hover:text-blue-600 transition"
           >
             <RotateCcw size={18} />
@@ -156,7 +172,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* --- THE SLIDER SECTION --- */}
+        {/* Slider */}
         <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-slate-100 mb-8">
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center space-x-2 text-slate-800">
@@ -177,33 +193,15 @@ export default function Dashboard() {
             onChange={(e) => setQuestionCount(parseInt(e.target.value))}
             className="w-full h-3 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-blue-600 mb-4"
           />
-          
-          <div className="flex justify-between text-[10px] text-slate-400 font-black uppercase px-1">
-            <span>Short (5)</span>
-            <span>Standard (35)</span>
-            <span>Intensive (70)</span>
-          </div>
         </div>
 
-        {/* --- DYNAMIC BUTTON --- */}
+        {/* Action Button */}
         <button 
           onClick={handleGenerate}
           disabled={loading || scanning || (!inputText && !file)}
-          className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black text-xl hover:bg-black disabled:bg-slate-200 flex flex-col items-center justify-center transition-all transform active:scale-[0.98] shadow-2xl"
+          className="w-full py-6 bg-slate-900 text-white rounded-3xl font-black text-xl hover:bg-black disabled:bg-slate-200 transition-all transform active:scale-[0.98] shadow-2xl"
         >
-          {scanning ? (
-            <div className="flex items-center space-x-3">
-              <Search className="animate-bounce" />
-              <span>Scanning Image...</span>
-            </div>
-          ) : loading ? (
-            <div className="flex items-center space-x-3">
-              <Loader2 className="animate-spin" />
-              <span>Creating Your Quiz...</span>
-            </div>
-          ) : (
-            <span>Generate {questionCount} Questions</span>
-          )}
+          {scanning ? "Scanning Image..." : loading ? "Creating Your Quiz..." : `Generate ${questionCount} Questions`}
         </button>
       </div>
     </div>

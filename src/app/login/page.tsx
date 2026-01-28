@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/utils/supabase/client'; // 1. Use the updated browser client
 import { useRouter } from 'next/navigation';
 import { BookOpen, Loader2, Mail, Lock, ArrowRight } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
+  const supabase = createClient(); // Initialize the client
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,13 +21,28 @@ export default function LoginPage() {
 
     try {
       if (isSignUp) {
-        const { error } = await supabase.auth.signUp({ email, password });
+        const { error } = await supabase.auth.signUp({ 
+          email, 
+          password,
+          options: {
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+          }
+        });
         if (error) throw error;
         setMessage("Check your email for the confirmation link!");
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { error, data } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        router.push('/'); // Redirect to dashboard after login
+
+        if (data?.session) {
+          // 2. CRUCIAL FIX: Refresh the router to sync cookies with Middleware
+          router.refresh(); 
+          
+          // 3. Give it a tiny moment to settle before navigating
+          setTimeout(() => {
+            router.push('/'); 
+          }, 100);
+        }
       }
     } catch (err: any) {
       setMessage(err.message);
@@ -37,7 +53,9 @@ export default function LoginPage() {
 
   const handleForgotPassword = async () => {
     if (!email) return alert("Please enter your email first.");
-    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+    });
     if (error) alert(error.message);
     else alert("Password reset link sent to your email!");
   };
@@ -68,7 +86,7 @@ export default function LoginPage() {
                 <input
                   type="email"
                   required
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border-2 border-slate-50 rounded-xl focus:border-blue-500 transition-all outline-none"
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border-2 border-slate-50 rounded-xl focus:border-blue-500 transition-all outline-none text-slate-900"
                   placeholder="name@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -84,7 +102,7 @@ export default function LoginPage() {
                   type="password"
                   required
                   autoComplete="current-password"
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border-2 border-slate-50 rounded-xl focus:border-blue-500 transition-all outline-none"
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border-2 border-slate-50 rounded-xl focus:border-blue-500 transition-all outline-none text-slate-900"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
