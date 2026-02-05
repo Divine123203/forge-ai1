@@ -16,13 +16,14 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
   const { id } = use(params);
   const router = useRouter();
   const supabase = createClient(); // Initialize client
-  
-  const [masterQuestions, setMasterQuestions] = useState<Question[]>([]); 
-  const [questions, setQuestions] = useState<Question[]>([]); 
+
+  const [masterQuestions, setMasterQuestions] = useState<Question[]>([]);
+  const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userAnswers, setUserAnswers] = useState<Record<number, string>>({});
   const [isFinished, setIsFinished] = useState(false);
   const [isReviewing, setIsReviewing] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   const [loading, setLoading] = useState(true); // Added loading state
 
   const shuffleArray = (array: any[]) => {
@@ -48,7 +49,7 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
 
       if (data && data.length > 0) {
         setMasterQuestions(data);
-        setQuestions(shuffleArray(data)); 
+        setQuestions(shuffleArray(data));
       }
       setLoading(false);
     }
@@ -59,7 +60,7 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
     if (currentIndex < questions.length - 1) {
       setCurrentIndex(prev => prev + 1);
     } else {
-      setIsReviewing(true); 
+      setIsReviewing(true);
     }
   };
 
@@ -68,7 +69,8 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
     setCurrentIndex(0);
     setIsFinished(false);
     setIsReviewing(false);
-    setQuestions(shuffleArray(masterQuestions)); 
+    setShowDetails(false);
+    setQuestions(shuffleArray(masterQuestions));
     window.scrollTo(0, 0);
   };
 
@@ -103,33 +105,100 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
     );
   }
 
-  // --- SCREEN A: FINAL RESULTS ---
   if (isFinished) {
     const finalScore = calculateFinalScore();
     const percentage = Math.round((finalScore / questions.length) * 100);
 
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
-        <div className="max-w-md w-full bg-white p-10 rounded-3xl shadow-2xl text-center border-t-8 border-blue-600">
-          <Award className="mx-auto text-yellow-500 mb-4" size={80} />
-          <h2 className="text-3xl font-bold mb-2">Quiz Results</h2>
-          <div className="text-6xl font-black text-blue-600 my-6">{finalScore} / {questions.length}</div>
-          <p className="text-lg text-gray-500 mb-8 font-medium italic">"{percentage >= 70 ? 'Excellent work!' : 'Keep practicing!'}"</p>
-          
-          <div className="flex flex-col space-y-3">
-            <button 
-              onClick={resetQuiz} 
-              className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold flex items-center justify-center space-x-2 hover:bg-blue-700 transition shadow-lg"
-            >
-              <RotateCcw size={20} /> <span>Retake (New Order)</span>
-            </button>
-            <button 
-              onClick={() => router.push('/generator')} 
-              className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold flex items-center justify-center space-x-2 hover:bg-black transition shadow-lg"
-            >
-              <Home size={20} /> <span>Create New Quiz</span>
-            </button>
+      <div className="min-h-screen bg-slate-50 py-12 px-4">
+        <div className={`mx-auto transition-all duration-500 ${showDetails ? 'max-w-4xl' : 'max-w-md'}`}>
+          <div className="bg-white p-10 rounded-3xl shadow-2xl text-center border-t-8 border-blue-600">
+            <Award className="mx-auto text-yellow-500 mb-4" size={80} />
+            <h2 className="text-3xl font-bold mb-2">Quiz Results</h2>
+            <div className="text-6xl font-black text-blue-600 my-6">{finalScore} / {questions.length}</div>
+            <p className="text-lg text-gray-500 mb-8 font-medium italic">"{percentage >= 70 ? 'Excellent work!' : 'Keep practicing!'}"</p>
+
+            <div className="flex flex-col space-y-3">
+              <button
+                onClick={() => setShowDetails(!showDetails)}
+                className="w-full bg-slate-100 text-slate-700 py-4 rounded-xl font-bold flex items-center justify-center space-x-2 hover:bg-slate-200 transition shadow-sm"
+              >
+                <Eye size={20} /> <span>{showDetails ? 'Hide Detailed Results' : 'View Detailed Results'}</span>
+              </button>
+              <button
+                onClick={resetQuiz}
+                className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold flex items-center justify-center space-x-2 hover:bg-blue-700 transition shadow-lg"
+              >
+                <RotateCcw size={20} /> <span>Retake (New Order)</span>
+              </button>
+              <button
+                onClick={() => router.push('/generator')}
+                className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold flex items-center justify-center space-x-2 hover:bg-black transition shadow-lg"
+              >
+                <Home size={20} /> <span>Create New Quiz</span>
+              </button>
+            </div>
           </div>
+
+          {showDetails && (
+            <div className="mt-12 text-left space-y-6 animate-in fade-in slide-in-from-top-4 duration-500">
+              <div className="flex items-center justify-between border-b pb-4">
+                <h3 className="text-2xl font-bold text-slate-800">Detailed Analysis</h3>
+                <span className="bg-blue-100 text-blue-700 px-4 py-1 rounded-full text-sm font-bold">
+                  {finalScore} Correct Out of {questions.length}
+                </span>
+              </div>
+
+              <div className="grid gap-6">
+                {questions.map((question, idx) => {
+                  const userAnswer = userAnswers[idx];
+                  const isCorrect = userAnswer === question.correct_answer;
+
+                  return (
+                    <div key={idx} className={`bg-white p-8 rounded-3xl shadow-md border-l-8 transition-all ${isCorrect ? 'border-green-500' : 'border-red-500'}`}>
+                      <div className="flex items-start gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-xs font-black uppercase text-slate-400">Question {idx + 1}</span>
+                            {isCorrect ? (
+                              <span className="bg-green-100 text-green-700 text-[10px] px-2 py-0.5 rounded-md font-bold uppercase">Correct</span>
+                            ) : (
+                              <span className="bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded-md font-bold uppercase">Incorrect</span>
+                            )}
+                          </div>
+                          <h4 className="text-xl font-bold text-slate-800 mb-6 leading-tight">{question.question_text}</h4>
+
+                          <div className="grid md:grid-cols-2 gap-4">
+                            <div className={`p-4 rounded-2xl border-2 ${isCorrect ? 'border-green-100 bg-green-50/20' : 'border-red-100 bg-red-50/20'}`}>
+                              <span className="text-[10px] font-black uppercase text-slate-400 block leading-none mb-2">Your Answer</span>
+                              <div className="flex items-center justify-between">
+                                <span className={`font-bold ${isCorrect ? 'text-green-700' : 'text-red-700'}`}>{userAnswer || 'No Answer'}</span>
+                                {isCorrect ? <CheckCircle className="text-green-500" size={18} /> : <div className="w-5 h-5 rounded-full bg-red-500 flex items-center justify-center text-white text-[10px] font-black">X</div>}
+                              </div>
+                            </div>
+
+                            {!isCorrect && (
+                              <div className="p-4 rounded-2xl border-2 border-blue-100 bg-blue-50/20">
+                                <span className="text-[10px] font-black uppercase text-blue-400 block leading-none mb-2">Correct Answer</span>
+                                <span className="font-bold text-slate-800">{question.correct_answer}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button
+                onClick={() => { window.scrollTo({ top: 0, behavior: 'smooth' }); setShowDetails(false); }}
+                className="w-full bg-white text-slate-500 py-4 rounded-2xl font-bold border-2 border-slate-100 hover:bg-slate-50 transition"
+              >
+                Back to Top
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -150,9 +219,8 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
               <button
                 key={idx}
                 onClick={() => { setCurrentIndex(idx); setIsReviewing(false); }}
-                className={`p-4 rounded-2xl border-2 flex flex-col items-center transition-all ${
-                  userAnswers[idx] ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-amber-200 bg-amber-50 text-amber-700'
-                }`}
+                className={`p-4 rounded-2xl border-2 flex flex-col items-center transition-all ${userAnswers[idx] ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-amber-200 bg-amber-50 text-amber-700'
+                  }`}
               >
                 <span className="text-xs font-bold uppercase mb-1">Q{idx + 1}</span>
                 <span className="text-sm font-bold">{userAnswers[idx] ? "Answered" : "Empty"}</span>
@@ -194,14 +262,12 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
             <button
               key={idx}
               onClick={() => setUserAnswers({ ...userAnswers, [currentIndex]: option })}
-              className={`w-full text-left p-6 rounded-2xl border-2 transition-all ${
-                currentSelection === option ? 'border-blue-600 bg-blue-50 text-blue-700 shadow-md' : 'border-slate-100 hover:border-blue-200'
-              }`}
+              className={`w-full text-left p-6 rounded-2xl border-2 transition-all ${currentSelection === option ? 'border-blue-600 bg-blue-50 text-blue-700 shadow-md' : 'border-slate-100 hover:border-blue-200'
+                }`}
             >
               <div className="flex items-center space-x-4">
-                <span className={`w-10 h-10 rounded-full flex items-center justify-center border-2 font-bold ${
-                  currentSelection === option ? 'bg-blue-600 text-white border-blue-600' : 'text-slate-400 border-slate-200'
-                }`}>
+                <span className={`w-10 h-10 rounded-full flex items-center justify-center border-2 font-bold ${currentSelection === option ? 'bg-blue-600 text-white border-blue-600' : 'text-slate-400 border-slate-200'
+                  }`}>
                   {String.fromCharCode(65 + idx)}
                 </span>
                 <span className="text-lg font-medium">{option}</span>
@@ -218,9 +284,8 @@ export default function QuizPage({ params }: { params: Promise<{ id: string }> }
           )}
           <button
             onClick={handleNext}
-            className={`flex-[2] py-5 rounded-2xl font-bold flex items-center justify-center space-x-2 transition shadow-lg ${
-              !currentSelection ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-black'
-            }`}
+            className={`flex-[2] py-5 rounded-2xl font-bold flex items-center justify-center space-x-2 transition shadow-lg ${!currentSelection ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-slate-900 text-white hover:bg-black'
+              }`}
           >
             <span>{currentIndex === questions.length - 1 ? "Review All" : "Next Question"}</span>
             <ChevronRight size={22} />
